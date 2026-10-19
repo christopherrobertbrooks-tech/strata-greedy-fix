@@ -1,0 +1,11 @@
+22:55:27 A: generated in 1187 ms (166.0 tok/s), drafts accepted 115 of 166 (stop)
+22:55:28 B: generated in 1699 ms (114.7 tok/s), drafts accepted 0 of 0 (stop)
+22:55:31 codeA: generated in 2065 ms (193.7 tok/s), drafts accepted 260 of 280 (length)
+22:55:34 codeB: generated in 3072 ms (112.0 tok/s), drafts accepted 0 of 0 (stop)
+22:56:42 C: generated in 1184 ms (166.4 tok/s), drafts accepted 115 of 166 (stop)
+22:56:44 codeC: generated in 2064 ms (193.8 tok/s), drafts accepted 260 of 280 (length)
+prose: fixed == true greedy: True;  0.1.45 == true greedy: False
+code: fixed == true greedy: True;  0.1.45 == true greedy: False
+23:03:31 fixed: 256: 156.5 tok/s / prefill 1167  1000: 156.7 tok/s / prefill 1731  4096: 116.7 tok/s / prefill 1793  16384: 57.6 tok/s / prefill 1605  32768: 34.6 tok/s / prefill 1359  65536: 19.6 tok/s / prefill 984
+23:03:31 drafts in the benchmark: 2659 of 3896 accepted
+23:03:38 LIVE DONE; V100 11 MiB

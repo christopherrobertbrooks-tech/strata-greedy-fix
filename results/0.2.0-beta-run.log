@@ -1,0 +1,19 @@
+15:16:05 START 0.2.0-beta 3d1fb48
+15:17:10 default up; strata-q36: context 131072 cells, prompt chunk 512, MTP block loaded, 19.31 GiB of VRAM free
+15:17:11 A: generated in 1184 ms (166.4 tok/s), drafts accepted 115 of 166 (stop)
+15:17:13 B: generated in 1706 ms (114.3 tok/s), drafts accepted 0 of 0 (stop)
+15:17:15 codeA: generated in 2068 ms (193.5 tok/s), drafts accepted 260 of 280 (length)
+15:17:18 codeB: generated in 3083 ms (111.6 tok/s), drafts accepted 0 of 0 (stop)
+15:34:28 default: 256: 109.3 / pp 1169  1000: 104.7 / pp 1734  4096: 85.7 / pp 1795  16384: 59.7 / pp 1607  32768: 40.3 / pp 1360  65536: 23.4 / pp 984  114688: 14.6 / pp 602
+15:34:28 default drafts: 0 of 0
+15:53:06 penalty0: 256: 156.9 / pp 1164  1000: 157.2 / pp 1733  4096: 117.0 / pp 1793  16384: 57.7 / pp 1606  32768: 34.6 / pp 1360  65536: 19.6 / pp 984  114688: 11.6 / pp 602
+15:53:06 penalty0 drafts: 3103 of 4540
+15:53:13 fix applied:  3 files changed, 57 insertions(+), 7 deletions(-)
+15:54:15 C: generated in 1184 ms (166.4 tok/s), drafts accepted 115 of 166 (stop)
+15:54:17 codeC: generated in 2067 ms (193.5 tok/s), drafts accepted 260 of 280 (length)
+16:11:42 fix: 256: 156.5 / pp 1168  1000: 156.4 / pp 1733  4096: 116.7 / pp 1793  16384: 57.6 / pp 1606  32768: 34.6 / pp 1360  65536: 19.6 / pp 984  114688: 11.6 / pp 602
+16:11:42 fix drafts: 3103 of 4540
+16:11:50 fix reverted: 0 changed files left
+prose: fixed == true greedy: True;  0.2.0 default == true greedy: False
+code: fixed == true greedy: True;  0.2.0 default == true greedy: False
+16:11:50 V020 DONE; V100 11 MiB

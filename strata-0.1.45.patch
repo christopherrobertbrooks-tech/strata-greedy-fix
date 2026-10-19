@@ -1,0 +1,146 @@
+From ceebaaed261a5b71be5ac1e350ac809a97a6a8e5 Mon Sep 17 00:00:00 2001
+From: christopherrobertbrooks-tech
+ <289533927+christopherrobertbrooks-tech@users.noreply.github.com>
+Date: Sun, 18 Oct 2026 22:54:50 -0500
+Subject: [PATCH] serve: temperature 0 stays greedy - no model-card penalties
+ on a greedy request (#2940)
+
+Since a8091f4d (#2685) a request without its own sampling gets the model card's set merged under it, so a
+request that asks for temperature 0 still picks up the card's presence_penalty 1.5 (Flash-Next when not
+thinking; Qwen3.6 in both thinking states). A penalty makes the engine sample from its logits: the answer is
+no longer the greedy one, and the MTP drafts (greedy requests only) never run - on the Qwen3.6 engine 0 drafts
+on every temperature-0 request.
+
+When the request, the shared Chat settings or the config's sampling block (the first that sets a temperature)
+asks for temperature 0, the card's penalties are left out; the rest of the card (top_p / top_k, which greedy
+ignores) and any penalty the request or config sets itself still apply. /props reports the same.
+
+Co-Authored-By: Claude Opus 5.5 <noreply@anthropic.com>
+---
+ docs/DETAILS.md                   |  2 +-
+ serve/server.py                   | 34 ++++++++++++++++++++++++++-----
+ serve/test_model_card_sampling.py | 28 ++++++++++++++++++++++++-
+ 3 files changed, 57 insertions(+), 7 deletions(-)
+
+diff --git a/docs/DETAILS.md b/docs/DETAILS.md
+index 5c5724f1..f6072ae7 100644
+--- a/docs/DETAILS.md
++++ b/docs/DETAILS.md
+@@ -1374,7 +1374,7 @@ block at all (0.1.45) a request without sampling keys gets the sampling the mode
+ request's thinking state: Qwen3.8-Flash-Next (and Gyro) thinking temperature 1.0, top_p 0.95, top_k 20; not thinking temperature 0.7,
+ top_p 0.8, top_k 20, presence_penalty 1.5. Qwen3.6-35B-A3B thinking 1.0 / 0.95 / 20 with presence_penalty 1.5, not thinking
+ 0.7 / 0.8 / 20 with 1.5 (min_p 0 and repetition_penalty 1 are "off"). Order of precedence: the request, the web page's shared Chat settings,
+-the config's `sampling` block, the card. Greedy is only for who asks for it: `temperature: 0` in the request, or `"sampling": {"temperature": 0}` in the config
++the config's `sampling` block, the card. Greedy is only for who asks for it: `temperature: 0` in the request, or `"sampling": {"temperature": 0}` in the config (or the shared Chat settings) - and then without the card's penalties: a penalty makes the engine sample from its logits, so the answer would not be the greedy one and the MTP drafts (greedy requests only) would not run (#2940)
+ (before 0.1.45 a config without a block ran greedy, and greedy decoding is what makes small local models loop; #2685). The web page sends no sampling of its own until you change its Sampling settings (it showed and sent 0.6 before); an old stored 0.6 with the default top_p and top_k counts as not set. The penalties (`presence_penalty`, `frequency_penalty`,
+ `repetition_penalty`, with `penalty_last_n` capping how many recent tokens they count over, default 64 when any
+ penalty is set; llama.cpp's names `repeat_penalty` and `repeat_last_n` work too, in the config's `sampling` block and in a request, #1819) ride the same path; they count the tokens the request has consumed, so a repetition penalty
+diff --git a/serve/server.py b/serve/server.py
+index 2e805773..84d94670 100644
+--- a/serve/server.py
++++ b/serve/server.py
+@@ -4190,7 +4190,9 @@ class Service:
+         `force` (forced_call): the opening of the call the reply must make - see prepare()."""
+         # the model card's sampling for this thinking state, then the config's block, then the Chat settings shared with
+         # apps; the request's own fields win over all of them
+-        defaults = {**model_card_sampling(self.model_arch, thinking), **self.sampling_defaults, **self.shared}
++        card = model_card_sampling(self.model_arch, thinking,
++                                   greedy=asks_greedy(sampling, self.shared, self.sampling_defaults))
++        defaults = {**card, **self.sampling_defaults, **self.shared}
+         if defaults:                   # the request's own fields win (explicit 0 stays greedy)
+             req_values = {k: v for k, v in (sampling or {}).items() if v is not None}
+             sampling = {**defaults, **req_values}
+@@ -5735,7 +5737,8 @@ def make_handler(svc: Service):
+             if not svc.loaded() and not getattr(svc.engine, "unloaded", False):
+                 self._json(503, {"error": {"message": "the engine is not running"}})
+                 return
+-            defaults = {**model_card_sampling(svc.model_arch, True), **svc.sampling_defaults, **svc.shared}
++            defaults = {**model_card_sampling(svc.model_arch, True, greedy=asks_greedy(svc.shared, svc.sampling_defaults)),
++                        **svc.sampling_defaults, **svc.shared}
+             names = {"repetition_penalty": "repeat_penalty", "penalty_last_n": "repeat_last_n"}
+             params = {names.get(k, k): v for k, v in defaults.items()
+                       if k in ("temperature", "top_p", "top_k", "min_p", "seed", "repetition_penalty",
+@@ -6788,10 +6791,31 @@ MODEL_CARD_SAMPLING = {
+ }
+ 
+ 
+-def model_card_sampling(arch, thinking) -> dict:
+-    """The model card's sampling for the family `arch` and the thinking state ({} for an unknown or unset family)."""
++# The card's penalties: a greedy request must not get them (see model_card_sampling)
++CARD_PENALTIES = ("presence_penalty", "frequency_penalty", "repetition_penalty")
++
++
++def model_card_sampling(arch, thinking, greedy=False) -> dict:
++    """The model card's sampling for the family `arch` and the thinking state ({} for an unknown or unset family).
++    `greedy` (temperature 0 asked for, see asks_greedy): without the card's penalties, so a greedy request stays greedy.
++    A penalty makes the engine sample from its logits: the answer is no longer the greedy one, and the MTP drafts
++    (greedy requests only) never run - with Qwen3.6's presence_penalty 1.5, 0 drafts on every temperature-0 request."""
+     sets = MODEL_CARD_SAMPLING.get(arch) if arch else None
+-    return dict(sets["thinking" if thinking else "instruct"]) if sets else {}
++    card = dict(sets["thinking" if thinking else "instruct"]) if sets else {}
++    if greedy:
++        for k in CARD_PENALTIES:
++            card.pop(k, None)
++    return card
++
++
++def asks_greedy(*layers) -> bool:
++    """True when greedy is asked for: the first of `layers` (highest precedence first - the request, the shared Chat
++    settings, the config's `sampling` block) that sets a temperature sets 0."""
++    for layer in layers:
++        t = (layer or {}).get("temperature")
++        if t is not None:
++            return isinstance(t, (int, float)) and not isinstance(t, bool) and float(t) <= 0.0
++    return False
+ 
+ 
+ def default_model_name(cfg: dict) -> str:
+diff --git a/serve/test_model_card_sampling.py b/serve/test_model_card_sampling.py
+index ee491506..73297f23 100644
+--- a/serve/test_model_card_sampling.py
++++ b/serve/test_model_card_sampling.py
+@@ -16,7 +16,7 @@ from pathlib import Path
+ 
+ sys.path.insert(0, str(Path(__file__).resolve().parents[1]))
+ from serve.frontend import ChatTemplate  # noqa: E402
+-from serve.server import ByteTokenizer, MockEngine, Service, StrataEngine, model_card_sampling, serve  # noqa: E402
++from serve.server import ByteTokenizer, MockEngine, Service, StrataEngine, asks_greedy, model_card_sampling, serve  # noqa: E402
+ 
+ ROOT = Path(__file__).resolve().parents[1]
+ 
+@@ -99,6 +99,32 @@ class ModelCardSampling(unittest.TestCase):
+         self.svc.shared = {}
+         self.assertNotIn("temperature", self.keys())     # a config that asks for greedy gets it
+ 
++    def test_greedy_gets_no_card_penalty(self):
++        # temperature 0 asked for stays greedy: no card presence_penalty (it made the engine sample and kept Qwen3.6's
++        # MTP drafts off on every temperature-0 request); a penalty the request or config asks for still applies
++        k = self.keys(temperature=0, reasoning_effort="none")            # Flash-Next, not thinking: the card has 1.5
++        self.assertNotIn("temperature", k)
++        self.assertNotIn("penalty_present", k)
++        self.svc.model_arch = "qwen35moe"                                # Qwen3.6: 1.5 in both thinking states
++        self.assertNotIn("penalty_present", self.keys(temperature=0))
++        self.assertNotIn("penalty_present", self.keys(temperature=0, reasoning_effort="none"))
++        self.assertIn("penalty_present=1.2", self.keys(temperature=0, presence_penalty=1.2))
++        self.assertIn("penalty_present=1.5", self.keys(temperature=0.3))   # not greedy: the card as before
++        self.svc.sampling_defaults = {"temperature": 0}                 # a config that asks for greedy
++        self.assertNotIn("penalty_present", self.keys())
++        self.assertIn("penalty_present=1.5", self.keys(temperature=0.7))  # ... unless the request asks for more
++        self.svc.sampling_defaults = {}
++        self.svc.shared = {"temperature": 0}                             # the shared Chat settings
++        self.assertNotIn("penalty_present", self.keys())
++
++    def test_asks_greedy(self):
++        self.assertTrue(asks_greedy({"temperature": 0}))
++        self.assertTrue(asks_greedy({}, {"temperature": 0.0}))
++        self.assertFalse(asks_greedy({"temperature": 0.5}, {"temperature": 0}))   # the first that says one wins
++        self.assertFalse(asks_greedy({"temperature": None}, {}))
++        self.assertFalse(asks_greedy())
++        self.assertEqual(model_card_sampling("qwen35moe", True, greedy=True), {"temperature": 1.0, "top_p": 0.95, "top_k": 20})
++
+     def test_no_family_no_defaults(self):
+         self.svc.model_arch = None
+         self.assertEqual(self.keys(), "")
+-- 
+2.43.0
+
